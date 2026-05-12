@@ -1,6 +1,7 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.kotlin.serialization)
 }
 
 android {
@@ -61,5 +62,6 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
 
     implementation("com.google.mediapipe:tasks-genai:0.10.14")
+    implementation(libs.kotlinx.serialization.json)
 
 }

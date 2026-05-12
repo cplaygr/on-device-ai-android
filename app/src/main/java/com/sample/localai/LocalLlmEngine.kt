@@ -37,8 +37,40 @@ class LocalLlmEngine(
     }
 
     suspend fun generateRandomGreeting(): String = withContext(Dispatchers.IO) {
-        val promt = "Respond with a single, random and creative greeting message. Do not use quotes."
+        val promt = "따옴표를 사용하지 말고, 무작위로 창의적인 인사말을 하나 작성해 주세요."
         return@withContext llmInference?.generateResponse(promt) ?: "Engine not initialized."
+    }
+
+    suspend fun generateWeatherComment(context: String): String = withContext(Dispatchers.IO) {
+        val engine = llmInference ?: return@withContext "오늘도 즐거운 하루 보내세요!"
+
+        val prompt = """
+            너는 위트있는 한국어 날씨 친구야.
+            아래 정보를 보고, 따옴표나 이모지 없이 한국어 한 문장으로
+            재미있고 따뜻한 한마디만 답해줘. 15자 이상 40자 이하로 작성해.
+
+            정보:
+            $context
+
+            한마디:
+        """.trimIndent()
+
+        repeat(2) {
+            val raw = engine.generateResponse(prompt)?.trim().orEmpty()
+            val cleaned = raw
+                .removePrefix("한마디:")
+                .removePrefix("\"")
+                .removeSuffix("\"")
+                .trim()
+            if (isMeaningfulComment(cleaned)) return@withContext cleaned
+        }
+        return@withContext "오늘도 즐거운 하루 보내세요!"
+    }
+
+    private fun isMeaningfulComment(text: String): Boolean {
+        if (text.length < 5) return false
+        val letters = text.count { it.isLetter() }
+        return letters >= 3
     }
 
     suspend fun generateChatResponse(history: List<ChatMessage>): String = withContext(Dispatchers.IO) {

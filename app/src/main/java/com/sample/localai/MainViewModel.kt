@@ -1,5 +1,6 @@
 package com.sample.localai
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.delay
@@ -11,6 +12,7 @@ import kotlinx.coroutines.launch
 
 class MainViewModel(private val llmEngine: LocalLlmEngine) : ViewModel() {
 
+    private val TAG = "MainViewModel"
     private val _uiState = MutableStateFlow("Hello World (Initializing...)")
     val uiState: StateFlow<String> = _uiState.asStateFlow()
 
@@ -28,7 +30,7 @@ class MainViewModel(private val llmEngine: LocalLlmEngine) : ViewModel() {
     private fun startPeriodicUpdates() {
         viewModelScope.launch {
             while (isActive) {
-                for (remaining in 10 downTo 1) {
+                for (remaining in 5 downTo 1) {
                     _countdown.value = remaining
                     delay(1_000)
                 }
@@ -36,6 +38,7 @@ class MainViewModel(private val llmEngine: LocalLlmEngine) : ViewModel() {
                 _uiState.value = "Thinking..." // 로딩 상태 인디케이터
 
                 val newText = llmEngine.generateRandomGreeting()
+                Log.d(TAG, "New greeting received: $newText")
                 _uiState.value = newText
             }
         }

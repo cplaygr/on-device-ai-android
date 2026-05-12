@@ -1,5 +1,6 @@
 package com.sample.localai
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -45,7 +46,9 @@ class ChatGemmaViewModel(private val llmEngine: LocalLlmEngine) : ViewModel() {
         }
 
         viewModelScope.launch {
+            Log.d("ChatGemmaViewModel", "Sending message to Gemma: $trimmed")
             val response = llmEngine.chat(trimmed)
+            Log.d("ChatGemmaViewModel", "Received response from Gemma: $response")
             val botMessage = ChatMessage(text = response, isUser = false)
             _state.update {
                 it.copy(

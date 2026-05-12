@@ -1,5 +1,6 @@
 package com.sample.localai.weather
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.sample.localai.LocalLlmEngine
@@ -84,7 +85,9 @@ class WeatherCardViewModel(
         val context = buildContextFor(card, weather)
         _state.update { it.copy(isCommenting = true) }
         viewModelScope.launch {
+            Log.d("WeatherCardViewModel", "Generating comment for card: $card")
             val comment = llmEngine.generateWeatherComment(context)
+            Log.d("WeatherCardViewModel", "Received comment: $comment")
             _state.update { it.copy(gemmaComment = comment, isCommenting = false) }
         }
     }

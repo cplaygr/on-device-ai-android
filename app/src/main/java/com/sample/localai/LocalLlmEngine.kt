@@ -41,6 +41,21 @@ class LocalLlmEngine(
         return@withContext llmInference?.generateResponse(promt) ?: "Engine not initialized."
     }
 
+    suspend fun generateChatResponse(history: List<ChatMessage>): String = withContext(Dispatchers.IO) {
+        val prompt = buildString {
+            history.forEach { msg ->
+                val role = if (msg.isUser) "user" else "model"
+                append("<start_of_turn>")
+                append(role)
+                append('\n')
+                append(msg.text)
+                append("<end_of_turn>\n")
+            }
+            append("<start_of_turn>model\n")
+        }
+        return@withContext llmInference?.generateResponse(prompt) ?: "Engine not initialized."
+    }
+
     fun close() {
         llmInference?.close()
         llmInference = null

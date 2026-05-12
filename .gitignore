@@ -1,0 +1,56 @@
+# ===== Gradle =====
+.gradle/
+build/
+**/build/
+gradle-wrapper.jar
+!gradle/wrapper/gradle-wrapper.jar
+.gradletasknamecache
+
+# ===== Android / Kotlin =====
+*.iml
+local.properties
+*.apk
+*.aab
+*.ap_
+*.dex
+*.class
+
+# ===== IDE - IntelliJ / Android Studio =====
+.idea/
+*.iws
+*.ipr
+out/
+/captures/
+
+# ===== Large model / binary assets =====
+*.bin
+*.gguf
+*.onnx
+*.tflite
+*.pt
+*.pth
+app/src/main/assets/
+
+# ===== NDK / CMake / CXX =====
+.cxx/
+.externalNativeBuild/
+cmake-build-*/
+*.so
+*.o
+*.a
+
+# ===== Kotlin =====
+.kotlin/
+kotlin-js-store/
+
+# ===== OS =====
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ===== Logs / Temp =====
+*.log
+*.tmp
+*.bak
+*.swp
+*~

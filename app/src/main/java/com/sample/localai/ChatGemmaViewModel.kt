@@ -45,8 +45,7 @@ class ChatGemmaViewModel(private val llmEngine: LocalLlmEngine) : ViewModel() {
         }
 
         viewModelScope.launch {
-            val history = _state.value.messages
-            val response = llmEngine.generateChatResponse(history).trim()
+            val response = llmEngine.chat(trimmed)
             val botMessage = ChatMessage(text = response, isUser = false)
             _state.update {
                 it.copy(

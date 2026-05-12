@@ -2,6 +2,7 @@ package com.sample.localai
 
 import android.content.Context
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
+import com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -10,53 +11,76 @@ class LocalLlmEngine(
     private val context: Context
 ) {
     private var llmInference: LlmInference? = null
+    private var isLegacyBin: Boolean = false
+
+    private var chatSession: LlmInferenceSession? = null
+    private var chatPrimed: Boolean = false
+
+    private val chatSystemPreamble: String = """
+        너는 친절하고 간결한 한국어 도우미야.
+        규칙:
+        - 한국어로만 답해.
+        - 한 번 답한 문장이나 표현을 같은 답변 안에서 반복하지 마.
+        - 불필요한 인사말은 빼고 핵심부터 말해.
+        - 답변은 2~4문장으로 짧게 유지해.
+    """.trimIndent()
+
+    // .bin 런타임은 temperature <= 1.0 강제
+    private fun Float.clampTemperature() = if (isLegacyBin) minOf(this, 1.0f) else this
 
     suspend fun initialize() = withContext(Dispatchers.IO) {
         if (llmInference != null) return@withContext
 
-        val modelName = "gemma-1.1-2b-it-cpu-int4.bin"
+        val modelName = resolveModelAssetName()
+        isLegacyBin = modelName.endsWith(".bin", ignoreCase = true)
         val destFile = File(context.filesDir, modelName)
 
-        // assets에서 복사해오기 (최초 1회)
-        if (!destFile.exists()) {
-            context.assets.open(modelName).use { inputStream ->
-                destFile.outputStream().use { outputStream ->
-                    inputStream.copyTo(outputStream)
+        val expectedSize: Long? = runCatching {
+            context.assets.openFd(modelName).use { it.length }
+        }.getOrNull()
+
+        val needsCopy = when {
+            !destFile.exists() -> true
+            expectedSize != null && destFile.length() != expectedSize -> true
+            else -> false
+        }
+        if (needsCopy) {
+            context.assets.open(modelName).use { input ->
+                destFile.outputStream().use { output ->
+                    input.copyTo(output)
                 }
             }
         }
 
-        // 내부 저장소에 안전하게 복사된 파일의 절대 경로 사용
-        val options = LlmInference.LlmInferenceOptions.builder()
+        // .bin: temperature는 LlmInferenceOptions에서만 설정 가능 (세션 API 없음)
+        // .task: LlmInferenceOptions는 모델 로딩 전용, temperature는 세션에서 설정
+        val optionsBuilder = LlmInference.LlmInferenceOptions.builder()
             .setModelPath(destFile.absolutePath)
-            .setMaxTokens(512)
-            .setTemperature(0.8f) // 1분마다 무작위 문구를 위해 0.8 정도로 설정
-            .build()
+            .setMaxTokens(1024)
 
-        llmInference = LlmInference.createFromOptions(context, options)
+        llmInference = LlmInference.createFromOptions(context, optionsBuilder.build())
     }
 
     suspend fun generateRandomGreeting(): String = withContext(Dispatchers.IO) {
-        val promt = "따옴표를 사용하지 말고, 무작위로 창의적인 인사말을 하나 작성해 주세요."
-        return@withContext llmInference?.generateResponse(promt) ?: "Engine not initialized."
+        generate(temperature = 1.0f, topK = 64, topP = 0.95f) {
+            "따옴표를 사용하지 말고, 무작위로 창의적인 인사말을 하나 작성해 주세요."
+        }.ifBlank { "안녕하세요!" }
     }
 
-    suspend fun generateWeatherComment(context: String): String = withContext(Dispatchers.IO) {
-        val engine = llmInference ?: return@withContext "오늘도 즐거운 하루 보내세요!"
-
+    suspend fun generateWeatherComment(weatherContext: String): String = withContext(Dispatchers.IO) {
         val prompt = """
             너는 위트있는 한국어 날씨 친구야.
             아래 정보를 보고, 따옴표나 이모지 없이 한국어 한 문장으로
             재미있고 따뜻한 한마디만 답해줘. 15자 이상 40자 이하로 작성해.
 
             정보:
-            $context
+            $weatherContext
 
             한마디:
         """.trimIndent()
 
         repeat(2) {
-            val raw = engine.generateResponse(prompt)?.trim().orEmpty()
+            val raw = generate(temperature = 0.8f, topK = 40, topP = 0.95f) { prompt }
             val cleaned = raw
                 .removePrefix("한마디:")
                 .removePrefix("\"")
@@ -64,32 +88,122 @@ class LocalLlmEngine(
                 .trim()
             if (isMeaningfulComment(cleaned)) return@withContext cleaned
         }
-        return@withContext "오늘도 즐거운 하루 보내세요!"
+        "오늘도 즐거운 하루 보내세요!"
+    }
+
+    suspend fun chat(userText: String): String = withContext(Dispatchers.IO) {
+        val engine = llmInference ?: return@withContext "Engine not initialized."
+
+        val firstTurnUser = if (!chatPrimed) {
+            chatPrimed = true
+            "$chatSystemPreamble\n\n$userText"
+        } else {
+            userText
+        }
+        val turn = "<start_of_turn>user\n$firstTurnUser<end_of_turn>\n<start_of_turn>model\n"
+
+        val response = if (isLegacyBin) {
+            // .bin: 세션 API 없음 — 매 턴마다 전체 히스토리 프롬프트 방식
+            val history = buildString {
+                chatHistory.forEach { append(it) }
+                append(turn)
+            }
+            val raw = engine.generateResponse(history) ?: ""
+            chatHistory.add(turn)
+            chatHistory.add("<start_of_turn>model\n$raw<end_of_turn>\n")
+            raw.trim()
+        } else {
+            // .task: 영구 세션으로 KV 캐시 재사용
+            val session = chatSession ?: createSession(
+                engine, temperature = 0.7f, topK = 40, topP = 0.95f
+            ).also { chatSession = it }
+            session.addQueryChunk(turn)
+            sanitizeChatResponse(session.generateResponse())
+        }
+
+        response
+    }
+
+    fun resetChatSession() {
+        chatSession?.close()
+        chatSession = null
+        chatHistory.clear()
+        chatPrimed = false
+    }
+
+    // .bin 모드 히스토리 (세션 없으므로 직접 관리)
+    private val chatHistory = mutableListOf<String>()
+
+    private fun generate(temperature: Float, topK: Int, topP: Float, prompt: () -> String): String {
+        val engine = llmInference ?: return ""
+
+        // isLegacyBin 분기 없이 LlmInferenceSession으로 통일
+        val session = createSession(engine, temperature.clampTemperature(), topK, topP)
+        return try {
+            session.addQueryChunk(prompt())
+            session.generateResponse().trim()
+        } finally {
+            // 단발성 호출이므로 바로 해제해서 JNI 메모리 릭 방지
+            session.close()
+        }
+    }
+
+    private fun createSession(
+        engine: LlmInference,
+        temperature: Float,
+        topK: Int,
+        topP: Float
+    ): LlmInferenceSession {
+        val opts = LlmInferenceSession.LlmInferenceSessionOptions.builder()
+            .setTemperature(temperature.clampTemperature())
+            .setTopK(topK)
+            .setTopP(topP)
+            .build()
+        return LlmInferenceSession.createFromOptions(engine, opts)
+    }
+
+    private fun sanitizeChatResponse(raw: String): String {
+        var text = raw
+        listOf("<start_of_turn>", "<end_of_turn>", "<|user|>", "<|assistant|>").forEach { token ->
+            val idx = text.indexOf(token)
+            if (idx >= 0) text = text.substring(0, idx)
+        }
+        text = text.trim()
+
+        val sentences = text.split(Regex("(?<=[.!?。！？])\\s+"))
+        val seen = linkedSetOf<String>()
+        val out = StringBuilder()
+        for (s in sentences) {
+            val key = s.trim()
+            if (key.isEmpty()) continue
+            if (!seen.add(key)) break
+            if (out.isNotEmpty()) out.append(' ')
+            out.append(key)
+        }
+        return out.toString().ifBlank { text }
+    }
+
+    private fun resolveModelAssetName(): String {
+        val assets = context.assets.list("")?.toList().orEmpty()
+        val task = assets.firstOrNull { it.endsWith(".task", ignoreCase = true) }
+        val bin = assets.firstOrNull { it.endsWith(".bin", ignoreCase = true) }
+        return task ?: bin
+            ?: error("assets/ 에 .task 또는 .bin 모델 파일이 없습니다.")
     }
 
     private fun isMeaningfulComment(text: String): Boolean {
         if (text.length < 5) return false
-        val letters = text.count { it.isLetter() }
-        return letters >= 3
-    }
-
-    suspend fun generateChatResponse(history: List<ChatMessage>): String = withContext(Dispatchers.IO) {
-        val prompt = buildString {
-            history.forEach { msg ->
-                val role = if (msg.isUser) "user" else "model"
-                append("<start_of_turn>")
-                append(role)
-                append('\n')
-                append(msg.text)
-                append("<end_of_turn>\n")
-            }
-            append("<start_of_turn>model\n")
-        }
-        return@withContext llmInference?.generateResponse(prompt) ?: "Engine not initialized."
+        return text.count { it.isLetter() } >= 3
     }
 
     fun close() {
+        chatSession?.close()
+        chatSession = null
         llmInference?.close()
         llmInference = null
+    }
+
+    companion object {
+        private const val DEFAULT_BIN_TEMPERATURE = 0.8f
     }
 }

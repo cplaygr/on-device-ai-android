@@ -11,7 +11,7 @@ composeBom = "2024.09.00"
 lifecycle = "2.8.7"
 kotlinxSerializationJson = "1.7.3"
 materialIconsCore = "1.7.5"
-mediapipeTasksGenai = "0.10.14"
+mediapipeTasksGenai = "0.10.35"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }

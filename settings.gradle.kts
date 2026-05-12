@@ -22,6 +22,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "LocalAISample"
+rootProject.name = "on-device-ai-android"
 include(":app")
  

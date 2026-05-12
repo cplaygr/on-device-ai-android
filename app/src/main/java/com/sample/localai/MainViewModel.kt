@@ -14,6 +14,9 @@ class MainViewModel(private val llmEngine: LocalLlmEngine) : ViewModel() {
     private val _uiState = MutableStateFlow("Hello World (Initializing...)")
     val uiState: StateFlow<String> = _uiState.asStateFlow()
 
+    private val _countdown = MutableStateFlow<Int?>(null)
+    val countdown: StateFlow<Int?> = _countdown.asStateFlow()
+
     init {
         viewModelScope.launch {
             llmEngine.initialize()
@@ -25,7 +28,11 @@ class MainViewModel(private val llmEngine: LocalLlmEngine) : ViewModel() {
     private fun startPeriodicUpdates() {
         viewModelScope.launch {
             while (isActive) {
-                delay(20_000) // 20초 대기
+                for (remaining in 10 downTo 1) {
+                    _countdown.value = remaining
+                    delay(1_000)
+                }
+                _countdown.value = null
                 _uiState.value = "Thinking..." // 로딩 상태 인디케이터
 
                 val newText = llmEngine.generateRandomGreeting()

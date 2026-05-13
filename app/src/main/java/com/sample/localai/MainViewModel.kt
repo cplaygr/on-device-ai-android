@@ -11,7 +11,6 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class MainViewModel(private val llmEngine: LocalLlmEngine) : ViewModel() {
-
     private val TAG = "MainViewModel"
     private val _uiState = MutableStateFlow("Hello World (Initializing...)")
     val uiState: StateFlow<String> = _uiState.asStateFlow()
@@ -21,9 +20,14 @@ class MainViewModel(private val llmEngine: LocalLlmEngine) : ViewModel() {
 
     init {
         viewModelScope.launch {
-            llmEngine.initialize()
-            _uiState.value = llmEngine.generateRandomGreeting()
-            startPeriodicUpdates()
+            runCatching {
+                llmEngine.initialize(LlmModelType.Gemma3n_E2b)
+            }.onSuccess {
+                _uiState.value = llmEngine.generateRandomGreeting()
+                startPeriodicUpdates()
+            }.onFailure { e ->
+                Log.e(TAG, "LLM Initialize Failed", e)
+            }
         }
     }
 

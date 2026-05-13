@@ -30,11 +30,14 @@ class LocalLlmEngine(
     // .bin 런타임은 temperature <= 1.0 강제
     private fun Float.clampTemperature() = if (isLegacyBin) minOf(this, 1.0f) else this
 
-    suspend fun initialize() = withContext(Dispatchers.IO) {
+    suspend fun initialize(modelType: LlmModelType = LlmModelType.AutoDetect) = withContext(Dispatchers.IO) {
+
         if (llmInference != null) return@withContext
 
-        val modelName = resolveModelAssetName()
+        // 파라미터로 받은 선호 모델명을 넘겨줌
+        val modelName = resolveModelAssetName(modelType.fileName)
         isLegacyBin = modelName.endsWith(".bin", ignoreCase = true)
+
         val destFile = File(context.filesDir, modelName)
 
         val expectedSize: Long? = runCatching {
@@ -46,6 +49,7 @@ class LocalLlmEngine(
             expectedSize != null && destFile.length() != expectedSize -> true
             else -> false
         }
+
         if (needsCopy) {
             context.assets.open(modelName).use { input ->
                 destFile.outputStream().use { output ->
@@ -54,8 +58,6 @@ class LocalLlmEngine(
             }
         }
 
-        // .bin: temperature는 LlmInferenceOptions에서 설정 불가능한 버전일 수 있음
-        // .task: LlmInferenceOptions는 모델 로딩 전용, temperature는 세션에서 설정
         val optionsBuilder = LlmInference.LlmInferenceOptions.builder()
             .setModelPath(destFile.absolutePath)
             .setMaxTokens(1024)
@@ -229,11 +231,18 @@ class LocalLlmEngine(
         return out.toString().ifBlank { text }
     }
 
-    private fun resolveModelAssetName(): String {
-        val assets = context.assets.list("")?.toList().orEmpty()
-        val task = assets.firstOrNull { it.endsWith(".task", ignoreCase = true) }
-        val bin = assets.firstOrNull { it.endsWith(".bin", ignoreCase = true) }
-        return task ?: bin
+    /**
+     * @param preferredName 우선적으로 사용할 모델 파일명 (예: "a.bin"). null이거나 비어있으면 자동 탐색.
+     */
+    private fun resolveModelAssetName(preferredName: String? = null): String {
+        if (!preferredName.isNullOrBlank()) {
+            Log.e(TAG, "preferredName is NullOrBlank")
+            return preferredName
+        }
+
+        val assets = context.assets.list("") ?: emptyArray()
+        return assets.firstOrNull { it.endsWith(".task", ignoreCase = true) }
+            ?: assets.firstOrNull { it.endsWith(".bin", ignoreCase = true) }
             ?: error("assets/ 에 .task 또는 .bin 모델 파일이 없습니다.")
     }
 
